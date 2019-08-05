@@ -6,6 +6,7 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.nio.file.Files;
@@ -14,12 +15,19 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
+
+import javax.mail.internet.MimeMessage;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.core.io.FileSystemResource;
+import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Component;
 
 import net.cc.commons.DateUtils;
@@ -29,67 +37,153 @@ public class ShellService {
 
 	private final static Logger logger = LoggerFactory.getLogger(ShellService.class);
 
-	@Value("${caac.mail}")
+	@Autowired
+	JavaMailSender jms;
+
+	/**
+	 * 邮件出处
+	 */
+	@Value("${spring.mail.username}")
+	private String from;
+
+	/**
+	 * 密码
+	 */
+	@Value("${spring.mail.password}")
+	private String password;
+
+	/**
+	 * 邮件发往处
+	 */
+	@Value("${caac.mailArr}")
 	private String[] toPeople;
 
-//	@Scheduled(cron = "0/10 * * * * ?")
-	private void test0() {
-		if (toPeople.length > 0) {
-			for (int i = 0; i < toPeople.length; i++) {
-				logger.info(toPeople[i]);
+	/**
+	 * 历史日志目录
+	 */
+	@Value("${caac.logDir}")
+	private String logDir;
+
+	/**
+	 * 给民航局发送的日志文件
+	 */
+	@Value("${caac.uploadFile}")
+	private String uploadFile;
+
+	/**
+	 * log_caac.log日志
+	 */
+	@Value("${caac.logFile}")
+	private String logFile;
+
+	/**
+	 * 每周一的九点发一份邮件
+	 */
+//	@Scheduled(cron = "*/10 * * * * *")
+	public void sendMailToCaac() {
+
+		MimeMessage message = jms.createMimeMessage();
+		try {
+			String[] fileArray = { uploadFile };
+			MimeMessageHelper helper = new MimeMessageHelper(message, true);
+			helper.setFrom(from);
+			helper.setTo(toPeople);
+			helper.setSubject("无人机云数据交换平台巡检周报(优凯)"); // 主题
+			helper.setText(mailText()); // 邮件正文
+			createExceptionFile(); // 生成邮件附件
+			// 验证文件数据是否为空
+			if (null != fileArray) {
+				FileSystemResource file = null;
+				for (int i = 0; i < fileArray.length; i++) {
+					// 添加附件
+					file = new FileSystemResource(fileArray[i]);
+					helper.addAttachment("数据上报异常记录.txt", file);
+				}
 			}
-		} else {
-			logger.info("无数据");
+			jms.send(message);
+			logger.info("带附件的邮件发送成功");
+		} catch (Exception e) {
+			logger.error("发送带附件的邮件失败", e);
 		}
 	}
 
-	@Scheduled(cron = "0/10 * * * * ?")
-	public void test() throws Exception {
-		// 获取
-		String filepath = "/home/coder/java-logs/luffy-sync/luffy-sync/caac";
+	/**
+	 * 设置邮件正文
+	 *
+	 * @return
+	 */
+	public String mailText() {
+		StringBuilder sBuilder = new StringBuilder();
+		// 巡检开始时间
+		String startTime = DateUtils.getDateBeforeOrAfterDays(7, -1, "yyyy年MM月dd日");
+		// 巡检结束时间
+		String endTime = DateUtils.getDateBeforeOrAfterDays(1, -1, "yyyy年MM月dd日");
+		// 上报时间
+		String uploadTime = new SimpleDateFormat("yyyy-MM-dd").format(new Date());
+
+		sBuilder.append("		无人机云数据交换平台巡检周报 \n");
+		sBuilder.append("			发布单位：优凯 \n");
+		sBuilder.append("巡检时间周期：（").append(startTime).append("至").append(endTime + ")\n");
+		sBuilder.append("报告日期：").append(uploadTime + "\n");
+		sBuilder.append("报告内容需包括以下内容：时间，巡检次数，云系统实时性 \n");
+		sBuilder.append("按照要求，优凯巡检工作人员在").append(startTime).append("至").append(endTime + "\n")
+				.append("对系统进行了共计28次巡检。巡检记录如下： \n");
+		sBuilder.append("系统运行情况：\n");
+		sBuilder.append("系统运行正常。\n");
+		sBuilder.append("数据交换情况：\n");
+		sBuilder.append("数据交换正常，电子围栏更新正常，数据上报异常见“数据上报异常记录”。");
+		return sBuilder.toString();
+	}
+
+	/**
+	 * 设置附件内容，即往数据上报异常.txt写入过滤的信息
+	 *
+	 * @throws Exception
+	 */
+	public void createExceptionFile() throws Exception {
+		// 获取指定目录下的文件
+		String filepath = logDir;
 		File file = new File(filepath);// File类型可以是文件也可以是文件夹
 		File[] fileList = file.listFiles();// 将该目录下的所有文件放置在一个File类型的数组中
 		List<File> logList = new ArrayList<File>();// 新建一个文件集合
+
 		for (int i = 0; i < fileList.length; i++) {
+			logger.info(fileList[i].getAbsolutePath());
 			if (fileList[i].isFile()) {// 判断是否为文件
 				logList.add(fileList[i]);
-				logger.info("============>" + fileList[i].getName());
 			}
 		}
-
-		// 排序
+		// 文件排序
 		logList = logList.stream().sorted().collect(Collectors.toList());
-		logger.info("======");
+
 		// 巡检开始时间
-		String startTimeStr = DateUtils.getDateBeforeOrAfterDays(23, -1, "yyyy-MM-dd");
-		logger.info(startTimeStr);
+		String startTimeStr = DateUtils.getDateBeforeOrAfterDays(7, -1, "yyyy-MM-dd");
 		// 巡检结束时间
-		String endTimeStr = DateUtils.getDateBeforeOrAfterDays(10, -1, "yyyy-MM-dd");
-		logger.info(endTimeStr);
+		String endTimeStr = DateUtils.getDateBeforeOrAfterDays(1, -1, "yyyy-MM-dd");
 		// 文件名转换过来的时间
 		long fileTime = 0;
 		long startTime = new SimpleDateFormat("yyyy-MM-dd").parse(startTimeStr).getTime();
 		long endTime = new SimpleDateFormat("yyyy-MM-dd").parse(endTimeStr).getTime();
 		// 记录符合时间范围的文件
 		List<File> qualifiedFiles = new ArrayList<>();
-
 		// 筛选时间在startTime至endTime的文件
 		for (File logfile : logList) {
 			fileTime = new SimpleDateFormat("yyyy-MM-dd").parse(logfile.getName().substring(9, 19)).getTime();
-			logger.info("fileTime:" + logfile.getName().substring(9, 19) + ",文件时间 :" + fileTime);
 			if (fileTime >= startTime && fileTime <= endTime) {
 				qualifiedFiles.add(logfile);
 			}
 		}
 
-		OutputStreamWriter out = new OutputStreamWriter(new FileOutputStream(new File("/home/coder/criss/数据上报异常.txt")));
+		OutputStreamWriter out = new OutputStreamWriter(new FileOutputStream(new File(uploadFile)));
 		BufferedWriter write = new BufferedWriter(out);
 		// 截取错误文件信息到指定文件
 		for (File logfile : qualifiedFiles) {
+			logger.info("qualified: " + logfile.getAbsolutePath());
 			String cmdStr = "cat " + logfile.getAbsolutePath() + " | grep -C 5  CAACLOGGER";
-			logger.info(cmdStr);
-			shellMethod(cmdStr, write, out, startTime, endTime);
+			shellMethod(cmdStr, write, startTime, endTime);
 		}
+
+		// 检查log_caac文件
 		checkCurrentCaacFile(write, startTime, endTime);
 		// 关闭文件流
 		write.close();
@@ -100,42 +194,38 @@ public class ShellService {
 	 *
 	 * @param cmdStr
 	 * @param write
-	 * @param out
 	 * @param startTime
 	 * @param endTime
 	 */
-	private void shellMethod(String cmdStr, BufferedWriter write, OutputStreamWriter out, long startTime,
-			long endTime) {
-		// 清空文件内容
-		clearInfoForFile("/home/coder/criss/数据上报异常.txt");
-
+	private void shellMethod(String cmdStr, BufferedWriter write, long startTime, long endTime) {
 		Process process = null;
-		List<String> processList = new ArrayList<>();
 		try {
 			String[] cmdArr = { "/bin/sh", "-c", cmdStr };
+			long start = System.currentTimeMillis();
+			logger.info("开始时间：" + start + ", cmd:" + cmdStr);
 			process = Runtime.getRuntime().exec(cmdArr);
+			readStreamInfo(write, process.getInputStream());
 			int status = process.waitFor();
+//			process.destroy();
+			logger.info("耗时：" + (System.currentTimeMillis() - start) / 1000);
 			if (status != 0) {
 				logger.error("Failed to call shell's command ， status:" + status);
+			} else {
+				logger.info("execute success");
 			}
 
-			BufferedReader input = new BufferedReader(new InputStreamReader(process.getInputStream()));
-			String line = "";
-			while ((line = input.readLine()) != null) {
-				processList.add(line);
-				write.write(line + "\r\n");
-			}
-
-			// 关闭输入流
-			input.close();
 		} catch (Exception e) {
-			logger.error("error", e);
-		}
-
-		for (String line : processList) {
-			logger.info(line);
+			logger.error("I/O error", e);
 		}
 	}
+
+	public void readStreamInfo(BufferedWriter write, InputStream... inputStreams){
+        ExecutorService executorService = Executors.newFixedThreadPool(inputStreams.length);
+        for (InputStream in : inputStreams) {
+            executorService.execute(new MyThread (write, in));
+        }
+        executorService.shutdown();
+    }
 
 	/**
 	 * 检查log_caac.log文件是不是在指定时间范围内
@@ -146,23 +236,22 @@ public class ShellService {
 	 */
 	private void checkCurrentCaacFile(BufferedWriter write, long startTime, long endTime) {
 		// log_caac文件所在目录
-		File file = new File("/home/coder/java-logs/luffy-sync/luffy-sync/log_caac.log");
+		File file = new File(logFile);
 		BasicFileAttributes bAttributes = null;
 		try {
 			bAttributes = Files.readAttributes(file.toPath(), BasicFileAttributes.class);
-			// log_caac修改时间 2019-05-08T01:04:52Z
+			// log_caac修改时间
 			String changeTime = bAttributes.lastModifiedTime().toString().replace('T', ' ');
 			changeTime = changeTime.substring(0, changeTime.length() - 1);
 			long changedTime = fixDateFormat(changeTime);
 
 			String startTimeStr = new SimpleDateFormat("yyyy-MM-dd").format(new Date(startTime)) + " 00:00:00";
 			String endTimeStr = new SimpleDateFormat("yyyy-MM-dd").format(new Date(endTime)) + " 23:59:59";
-			logger.info("startTime:" + startTimeStr + ", endTime:" + endTimeStr);
 			startTime = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").parse(startTimeStr).getTime();
 			endTime = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").parse(endTimeStr).getTime();
 			if (changedTime >= startTime && changedTime <= endTime) {
 				// 将log_caac.log内容写入数据异常上报记录.txt
-				String cmdStr = "cat /home/coder/java-logs/luffy-sync/luffy-sync/log_caac.log | grep -C 5 CAACLOGGER";
+				String cmdStr = "cat " + logFile + " | grep -C 5 CAACLOGGER";
 				String[] cmdArr = { "/bin/sh", "-c", cmdStr };
 				Process process = Runtime.getRuntime().exec(cmdArr);
 				int status = process.waitFor();
@@ -177,9 +266,8 @@ public class ShellService {
 				}
 				input.close();
 			}
-
 		} catch (Exception e) {
-			logger.error("check and write log_caac.log error", e);
+			logger.error("check log_caac.logger error", e);
 		}
 
 	}
@@ -215,5 +303,36 @@ public class ShellService {
 			logger.error("clear file text error", e);
 		}
 	}
-
 }
+
+class MyThread implements Runnable {
+    private InputStream in;
+    private BufferedWriter write;
+    public MyThread(BufferedWriter write, InputStream in){
+    	this.write = write;
+        this.in = in;
+    }
+
+    @Override
+    public void run() {
+    	synchronized(write) {
+    		try{
+                BufferedReader br = new BufferedReader(new InputStreamReader(in, "UTF-8"));
+                String line = null;
+                while((line = br.readLine())!=null){
+                	write.write(line + "\r\n");
+                }
+            }catch (Exception e){
+                e.printStackTrace();
+            }finally {
+                try {
+                    in.close();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+    	}
+
+    }
+}
+

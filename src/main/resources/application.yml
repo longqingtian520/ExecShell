@@ -1,4 +1,28 @@
 server:
-  port: 9099
+  port: 9097
+  
+spring:
+  mail:
+    host: smtp.exmail.qq.com
+    username: wangqiubao@u-care.net.cn
+    password: Java02
+    properties:
+      mail.transport.protocol: smtp
+      mail.smtp.host: "smtp.exmail.qq.com"
+      mail.smtp.port: 465
+      mail.smtp.auth: true
+      mail.smtp.ssl.enable: true
+      mail.smtp.starttls.enable: true
+      mail.smtp.starttls.required: true
+#  security:
+#    user:
+#      name: wangqiubao
+#      password: wangqiubao
 caac:
-  mail: 315747409@qq.com, wangqb1129@163.com
+  mailArr: 315747409@qq.com, wangqb1129@163.com
+#  logDir: "/usr/local/stuff/webapi/luffy-consumer/logs/luffy-consumer/caac"
+#  uploadFile: "/usr/local/stuff/webapi/luffy-consumer/logs/luffy-consumer/uploadCaacException.txt"
+#  logFile: "/usr/local/stuff/webapi/luffy-consumer/logs/luffy-consumer/log_caac.log"
+  logDir: "/boost/coder/java-logs/luffy-consumer/luffy-consumer/caac"
+  uploadFile: "/boost/coder/java-logs/luffy-consumer/luffy-consumer/uploadCaacException.txt"
+  logFile: "/boost/coder/java-logs/luffy-consumer/luffy-consumer/log_caac.log"
